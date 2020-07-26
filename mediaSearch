@@ -1,0 +1,194 @@
+#!/bin/bash
+results=search.log
+mangaSource=https://mangahub.io/search?q=
+animeSource=https://horriblesubs.info/shows/
+scriptsDir=$(pwd)
+mangaList=~/Scripts/manga.cfg
+animeList=~/Scripts/anime.cfg
+mangaScript=~/Scripts/mangaPull
+animeScript=~/Scripts/animePull
+mangaPath=~/Media/Manga/
+animePath=~/Media/Anime/
+argumentError="Error: invalid arguments provided, please see script usage;"
+usageHint="./mediaSearch.sh [anime/manga] [add/remove] [search-term]"
+
+# This script is meant to be called with three arguments
+# $1 - the type of media to add 
+#    - currently supported: [manga/anime]
+# $2 - whether to add or remove the given media [add/remove]
+# $3 - search string of media to be added to/removed from pull list (must be all lower case , words separated with hyphens)
+# If all arguments are not provided correctly, script will exit with code 1
+# Given a search term, this script will output a list of matches to the search term from the specefic media's source site
+# The user can then choose one of the matches to add to the respective pull list
+# Once the media is added, the user can then choose to update the media immediately or wait until the next pull runs
+
+# Development direction
+# Modify the script to only have two functions - addMedia and removeMedia
+# These two scripts will accept multiple variables depending on what the media is
+# These variables will dictate what the media added/removed is
+# The two functions will need arguments passed based on what media is chosen
+
+# Exit if arguments not given
+[ -z $3 ] && echo $argumentError && echo $usageHint && exit 1
+
+addMedia() {
+	# This function has 5 arguments
+	# $1 - the search term for the media 
+	# $2 - the source for the media
+	# $3 - the regular expression to filter search results
+	# $4 - the list to add the chosen media to
+	# $5 - the script to call
+	wget -r --spider -nd -nv -l 1 --regex-type='pcre' --accept-regex=$1 -o $results $2
+	filteredResults="$(grep $3 $results | awk '{print $3}' | sort | awk '{print "[" NR "] | " $1}')"
+	echo "$filteredResults"
+	
+	read -p 'Input Selection : ' select
+
+        # Get the url to the selected media
+	url=$(echo "$filteredResults" | sed -n $select','$select'p')
+        url=${url%_*}
+        url=${url#*:}
+
+        # Clean up files
+        rm -f $results
+
+        # Check to see if the url is in the config file
+        # If not, add it to the file
+        [ -f $4 ] && grep -q $url $4 && echo 'This is already in the pull list' && exit 0 || echo $url',0' >> $4 
+
+        # Ask user if manga should be pulled now
+	read -p 'Would you like to pull this now? (y/n) ' select
+	read -p 'Would you like to pull just the latest release (y/n) ' select2
+        case "$select:$select2" in
+		'y':'y' ) echo 'Pulling latest release' ; $5 $url 1 ;;
+                'y':* ) echo 'Pulling full media' ; $5 $url ;;
+                *:* ) echo 'This will be added to its respective pull list and pulled later' ;;
+        esac
+}
+
+removeMedia() {
+	# This function has 3 arguments
+	# $1 - the search term for the media
+	# $2 - the list to remove the chosen media from
+	# $3 - the path of the media 
+	# Search for the search term in the pull list
+        # Present the results and allow the user to choose something to remove
+        echo 'Warning: the removed media will be deleted from '$3
+	read -p 'Proceed? (y/n) ' select
+        case $select in
+                'y' | 'Y' ) ;;
+                * ) echo 'Aborting' && exit 0 ;;
+        esac
+	grep $1 $2 || exit 1
+        grep $1 $2 | awk -F ',' '{print "[" NR "] | " $1}' | sort
+        read -p 'Input Selection: ' select
+
+        # Remove the selected manga from both pull list and local storage
+        url=$(grep $1 $2 | awk -F ',' '{print "[" NR "] | " $1}' | sort | sed -n $select','$select'p')
+        title=${url##*/}
+        sed -i -e "/$title/d" $2 && rm -r $3$title && echo $title' has been removed'
+}
+
+addManga() {
+	# Search for the search term in the manga directory 
+        # Present the results and allow the user to choose a manga to add
+        wget -r --spider -nd -nv -l 1 --regex-type='pcre' --accept-regex=$1 -o $results $mangaSource$1
+        filteredResults="$(grep /manga/.*$1.* $results | awk '{print $3}' | sort | awk '{print "[" NR "] | " $1}')"
+	echo "$filteredResults"
+
+	read -p 'Input Selection : ' select
+
+        # Get the url to the selected manga
+        # url=$(grep /manga/.*$1.* $results | awk '{print $3}' | sort | awk '{print "[" NR "] | "  $1}' | sed -n $select','$select'p')
+	url=$(echo "$filteredResults" | sed -n $select','$select'p')
+        url=${url%_*}
+        url=${url#*:}
+
+        # Clean up files
+        rm -f $results
+
+        # Check to see if the url is in the config file
+        # If not, add it to the file
+        [ -f $mangaList ] && grep -q $url $mangaList && echo 'This manga is already in the pull list' && exit 0 || echo $url',0' >> $mangaList 
+
+        # Ask user if manga should be pulled now
+	read -p 'Would you like to pull this manga now? (y/n) ' select
+	read -p 'Would you like to pull just the latest chapter? (y/n) ' select2
+        case "$select:$select2" in
+		'y':'y' ) echo 'Pulling latest chapter' ; $scriptsDir/mangaPull $url 1 ;;
+                'y':* ) echo 'Pulling full manga' ; $scriptsDir/mangaPull $url ;;
+                *:* ) echo 'This manga will be added to the pull list and pulled later' ;;
+        esac
+}
+
+addAnime () {
+	# Search for the search term in the anime directory
+	# Present the results and allow the user to choose an anime to add
+	wget -r --spider -nd -nv -l 1 --regex-type='pcre' --accept-regex=$1 -o $results $animeSource
+	grep /shows/.*$1.* $results | awk '{print $3}' | sort | awk '{print "[" NR "] | " $1}'
+
+	read -p 'Input Selection : ' select
+	
+	# Get the url to the selected anime
+	url=$(grep /shows/.*$1.* $results | awk '{print $3}' | sort | awk '{print "[" NR "] | "  $1}' | sed -n $select','$select'p')
+        url=${url%_*}
+        url=${url#*:}
+
+        # Clean up files
+        rm -f $results
+
+        # Check to see if the url is in the config file
+        # If not, add it to the file
+        [ -f $animeList ] && grep -q $url $animeList && echo 'This anime is already in the pull list' && exit 0 || echo $url',0' >> $animeList 
+
+        # Ask user if manga should be pulled now
+	read -p 'Would you like to pull this anime now? (y/n) ' select
+	read -p 'Would you like to pull just the latest episode? (y/n) ' select2
+        case $select in
+                'y'|'Y' ) echo 'Pulling anime' ; $scriptsDir/animePull $url ;;
+                * ) echo 'This anime will be added to the pull list and pulled later' ;;
+        esac
+}
+
+removeManga() {
+	# Search for the search term in the pull list
+        # Present the results and allow the user to choose a manga to remove
+        echo 'Warning: the removed manga will be deleted from '$path'Manga/'
+	read -p 'Proceed? (y/n) ' select
+        case $select in
+                'y' | 'Y' ) ;;
+                * ) echo 'Aborting' && exit 0 ;;
+        esac
+	grep $1 $mangaList || exit 1
+        grep $1 $mangaList | awk -F ',' '{print "[" NR "] | " $1}' | sort
+        read -p 'Input Selection: ' select
+
+        # Remove the selected manga from both pull list and local storage
+        url=$(grep $1 $mangaList | awk -F ',' '{print "[" NR "] | " $1}' | sort | sed -n $select','$select'p')
+        title=${url##*/}
+        sed -i -e "/$title/d" $mangaList && rm -r $path'Manga/'$title && echo $title' has been removed'
+}
+
+removeAnime(){
+	echo 'Removing anime - '$1
+}
+
+# Old script call
+: <<'END'
+case "$1:$2" in
+	'manga':'add' ) addManga $3 ;;
+	'anime':'add' ) addAnime $3 ;;
+	'manga':'remove' ) removeManga $3 ;;
+	'anime':'remove' ) removeAnime $3 ;;
+	*:* ) echo $argumentError && echo $usageHint && exit 1
+esac
+END
+
+# New script call
+case "$1:$2" in
+	'manga':'add' ) addMedia $3 $mangaSource$3 /manga/.*$3.* $mangaList $mangaScript ;;
+	'anime':'add' ) addMedia $3 $animeSource /shows/.*$3.* $animeList $animeScript ;;
+	'manga':'remove' ) removeMedia $3 $mangaList $mangaPath ;;
+	'anime':'remove' ) removeMedia $3 $animeList $animePath ;;
+	*:* ) echo $argumentError && echo $usageHint && exit 1
+esac

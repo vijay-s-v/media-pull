@@ -1,0 +1,83 @@
+#!/bin/sh
+list=$(pwd)/manga.cfg
+path=~/Media/Manga/
+imgDir=https://img.mghubcdn.com/file/imghub/
+
+# This script is meant to be called with one, two, or no arguments
+# $1 - name of manga to be pulled (must be in pull list and must be all lower case separated with hyphens)
+# $2 - whether or not to do a full update 
+#    - doesn't matter what's passed in as the argument
+#    - if this argument exists, only the latest update will be pulled, otherwise all new updates will be pulled
+# If no argument is provided, the script loops through the whole pull list and does a full update
+# Note: if $1 matches more than one manga in the pull list it will pull all matching manga
+# Note: this script should not be called on its own but either via mediaSearch.sh or run as a cronjob
+
+# Ensure that the config file exists
+[ -f $list ] || echo 'Error: pull list not found'
+# If no argument is passed, pull the whole pull list
+[ -z $1 ] && mangaToPull=$(awk -F ',' '{print $1}' $list) || mangaToPull=$(grep $1 $list | awk -F ',' '{print $1}')
+
+pull(){
+
+	for url in $1
+	do
+
+		# Get some data about the manga and the last chapter pulled
+		title=${url##*/}
+		lastChapter=$(grep $url $list | cut -d ',' -f 2)
+		chapterList=$title.log 
+
+		# Ensure that the folder for the manga exists, if not create it
+		[ -d $path$title ] || mkdir $path$title
+		echo 'Pulling '$title'...'
+		echo 'Last chapter pulled was '$lastChapter
+
+		# Get the list of chapters available)
+		wget -r --spider -nd -nv -l 1 --regex-type='pcre' --accept-regex='chapter' -o $chapterList $url
+		sortPos=$(grep /chapter/.*$title.* $chapterList | awk '{print $3}' | sort -n | head -n 1 | wc -m)
+		sortPos=$(( $sortPos - 1 ))
+		chapterList=$(grep /chapter/.*$title.* $chapterList | awk '{print $3}' | sort -n -r -k1.$sortPos)
+
+		# Determine the latest chapter out
+		latestChapter=$(echo $chapterList | awk '{print $1}')
+		# If the 'latest only' flag exists, truncate the chapter list to pull to only the latest chapter
+		[ $# -eq 2 ] && chapterList=$latestChapter
+		latestChapter=${latestChapter##*-}
+
+		# Loop through the chapter list in order from latest to last read
+		# Download chapters until you reach a chapter that is not newer than the last read
+		for chapter in $chapterList
+		do
+
+			chapterNum=${chapter##*-}
+			(( $(echo "$chapterNum > $lastChapter" | bc -l) )) && echo 'Pulling chapter '$chapterNum'...' || break
+
+			# Because some chapters are uploaded as png and others as jpgs, we need to test which format to use
+			# Use the first page to test what file extension is being used
+			wget -q --random-wait $imgDir$title/$chapterNum/1.jpg && fileType=jpg || fileType=png
+			rm -f 1.jpg >/dev/null
+			pgNum=1
+			while : 
+			do
+				# Create sortable page number
+				printf -v sortablePgNum "%03d" "$pgNum"
+				wget -q --random-wait $imgDir$title/$chapterNum/$pgNum.$fileType || break
+				mv $pgNum.$fileType $path$title/$sortablePgNum.$fileType
+				pgNum=$(( $pgNum + 1 ))	
+			done
+			# Compile pages into a single pdf and send notification of download
+			echo 'Compiling pages into pdf...' ; convert $path$title/*.$fileType $path$title/$chapterNum.pdf && rm -f $path$title/*.$fileType && notify-send 'Manga - '$title' Ch. '$chapterNum' downloaded'
+
+		done
+
+		# Update the pull list to reflect the last pulled chpater
+		sed -i -e "/$title/s/$lastChapter/$latestChapter/" $list && echo 'Last pulled chapter is now '$latestChapter
+
+	done
+
+}
+
+[ $# -eq 2 ] && pull "$mangaToPull" $2 && echo 'Pulling only latest chapter' || pull "$mangaToPull"
+
+# Clean up log files
+rm -f *.log
