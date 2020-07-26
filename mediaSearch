@@ -3,10 +3,10 @@ results=search.log
 mangaSource=https://mangahub.io/search?q=
 animeSource=https://horriblesubs.info/shows/
 scriptsDir=$(pwd)
-mangaList=~/Scripts/manga.cfg
-animeList=~/Scripts/anime.cfg
-mangaScript=~/Scripts/mangaPull
-animeScript=~/Scripts/animePull
+mangaList=$scriptsDir/manga.cfg
+animeList=$scriptsDir/anime.cfg
+mangaScript=$scriptsDir/mangaPull
+animeScript=$scriptsDir/animePull
 mangaPath=~/Media/Manga/
 animePath=~/Media/Anime/
 argumentError="Error: invalid arguments provided, please see script usage;"
